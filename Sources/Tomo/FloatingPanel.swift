@@ -11,10 +11,11 @@ final class FloatingPanel: NSPanel {
             backing: .buffered,
             defer: false
         )
+        isFloatingPanel = true
         // Above the menu bar, so Tomo can sit at the very top of the screen.
+        // Set this after isFloatingPanel, which resets the level to .floating.
         level = .statusBar
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        isFloatingPanel = true
         hidesOnDeactivate = false
         isOpaque = false
         backgroundColor = .clear
