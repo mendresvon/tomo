@@ -1,4 +1,4 @@
-import SwiftUI
+import CoreGraphics
 
 /// What Tomo is doing. Each mood has its own animation.
 enum Mood: String, CaseIterable {
@@ -26,27 +26,70 @@ enum Sprites {
     /// The canvas is a square of this many pixels.
     static let canvasSize = 24
 
-    static let palette: [Character: Color] = [
-        "K": Color(hex: 0x3D2333),  // outline
-        "R": Color(hex: 0xFF5B5B),  // body
-        "D": Color(hex: 0xD93F4C),  // body shade
-        "H": Color(hex: 0xFFA8A0),  // body highlight
-        "G": Color(hex: 0x5CC96B),  // leaf
-        "g": Color(hex: 0x2F8F4E),  // leaf shade and stem
-        "k": Color(hex: 0x2A1620),  // eyes and mouth
-        "W": Color(hex: 0xFFFFFF),  // eye shine
-        "P": Color(hex: 0xFF8FAB),  // cheeks
-        "B": Color(hex: 0x4D9DE0),  // headband
-        "L": Color(hex: 0xC3CCDA),  // laptop lid
-        "l": Color(hex: 0xFFFFFF),  // laptop logo
-        "A": Color(hex: 0x8592A8),  // laptop base
-        "T": Color(hex: 0xC9824A),  // tea
-        "M": Color(hex: 0xFFF4E2),  // mug
-        "s": Color(hex: 0xB8C4D6),  // steam
-        "z": Color(hex: 0x7FA7FF),  // sleep Z
-        "Y": Color(hex: 0xFFD23F),  // sparkle
-        "S": Color.black.opacity(0.18),  // ground shadow
+    /// Colors as 0xRRGGBB. "S" is the only see-through color.
+    static let palette: [Character: UInt32] = [
+        "K": 0x3D2333,  // outline
+        "R": 0xFF5B5B,  // body
+        "D": 0xD93F4C,  // body shade
+        "H": 0xFFA8A0,  // body highlight
+        "G": 0x5CC96B,  // leaf
+        "g": 0x2F8F4E,  // leaf shade and stem
+        "k": 0x2A1620,  // eyes and mouth
+        "W": 0xFFFFFF,  // eye shine
+        "P": 0xFF8FAB,  // cheeks
+        "B": 0x4D9DE0,  // headband
+        "L": 0xC3CCDA,  // laptop lid
+        "l": 0xFFFFFF,  // laptop logo
+        "A": 0x8592A8,  // laptop base
+        "T": 0xC9824A,  // tea
+        "M": 0xFFF4E2,  // mug
+        "s": 0xB8C4D6,  // steam
+        "z": 0x7FA7FF,  // sleep Z
+        "Y": 0xFFD23F,  // sparkle
+        "S": 0x000000,  // ground shadow (drawn at 18% opacity)
     ]
+    private static let shadowAlpha: CGFloat = 0.18
+
+    /// One small image per frame, one image pixel per sprite pixel (24 x 24).
+    /// Core Animation scales them up with nearest-neighbor filtering, so they stay sharp
+    /// and use almost no memory. Built once per mood, then reused.
+    static func images(for mood: Mood) -> [CGImage] {
+        if let cached = imageCache[mood] { return cached }
+        let images = animation(for: mood).frames.compactMap { image(of: $0) }
+        imageCache[mood] = images
+        return images
+    }
+
+    nonisolated(unsafe) private static var imageCache: [Mood: [CGImage]] = [:]
+
+    /// Draws a frame into a bitmap. `scale` is image pixels per sprite pixel.
+    static func image(of frame: PetFrame, scale: Int = 1) -> CGImage? {
+        let side = canvasSize * scale
+        guard let context = CGContext(
+            data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        draw(frame, in: context, pixel: CGFloat(scale), originY: CGFloat(side))
+        return context.makeImage()
+    }
+
+    /// Fills one square per sprite pixel. The context has y going up, so rows are
+    /// drawn down from `originY`.
+    static func draw(_ frame: PetFrame, in context: CGContext, pixel: CGFloat, originX: CGFloat = 0, originY: CGFloat) {
+        for layer in frame.layers {
+            for (row, line) in layer.grid.enumerated() {
+                for (col, char) in line.enumerated() where char != "." {
+                    guard let hex = palette[char] else { continue }
+                    let x = layer.x + col
+                    let y = layer.y + row
+                    guard (0..<canvasSize).contains(x), (0..<canvasSize).contains(y) else { continue }
+                    context.setFillColor(cgColor(hex, alpha: char == "S" ? shadowAlpha : 1))
+                    context.fill(CGRect(x: originX + CGFloat(x) * pixel, y: originY - CGFloat(y + 1) * pixel, width: pixel, height: pixel))
+                }
+            }
+        }
+    }
 
     static func animation(for mood: Mood) -> PetAnimation {
         switch mood {
@@ -265,12 +308,11 @@ enum Sprites {
     }()
 }
 
-extension Color {
-    init(hex: UInt32) {
-        self.init(
-            red: Double((hex >> 16) & 0xFF) / 255,
-            green: Double((hex >> 8) & 0xFF) / 255,
-            blue: Double(hex & 0xFF) / 255
-        )
-    }
+func cgColor(_ hex: UInt32, alpha: CGFloat = 1) -> CGColor {
+    CGColor(
+        srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
+        green: CGFloat((hex >> 8) & 0xFF) / 255,
+        blue: CGFloat(hex & 0xFF) / 255,
+        alpha: alpha
+    )
 }

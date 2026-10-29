@@ -13,13 +13,17 @@ TARGET="$(uname -m)-apple-macos14.0"
 mkdir -p "$OBJ"
 
 echo "Compiling…"
-swiftc -swift-version 5 -O -target "$TARGET" -parse-as-library \
+# -O: optimize for speed. -wmo: optimize across files.
+# -dead_strip: drop unused code. The binary is stripped after linking.
+FLAGS=(-swift-version 5 -O -wmo -target "$TARGET")
+swiftc "${FLAGS[@]}" -parse-as-library \
   -emit-module -emit-library -static -module-name TomoCore \
   -emit-module-path "$OBJ/TomoCore.swiftmodule" -o "$OBJ/libTomoCore.a" \
   "$ROOT"/Sources/TomoCore/*.swift
-swiftc -swift-version 5 -O -target "$TARGET" \
+swiftc "${FLAGS[@]}" -Xlinker -dead_strip \
   -I "$OBJ" -L "$OBJ" -lTomoCore -module-name Tomo -o "$OBJ/Tomo" \
   "$ROOT"/Sources/Tomo/*.swift
+strip -x "$OBJ/Tomo"
 
 echo "Drawing the app icon…"
 ICONSET="$OBJ/AppIcon.iconset"

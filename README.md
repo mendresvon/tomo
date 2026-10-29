@@ -38,6 +38,23 @@ To copy the app to `~/Applications` so you can open it from Spotlight:
 
 Tomo has no Dock icon. If you hide it and forget the shortcut, open the app again and Tomo comes back.
 
+To start a focus round as Tomo opens:
+
+```bash
+open ~/Applications/Tomo.app --args --start
+```
+
+## Resource use
+
+Tomo is made to stay open all day at almost no cost:
+
+- It uses plain AppKit and Core Animation, with no SwiftUI.
+- The pet animation is a looping Core Animation keyframe animation. The system compositor plays it, so Tomo's own code does no work per frame.
+- With no timer running, Tomo has no timers at all and uses no CPU.
+- While a timer runs, Tomo wakes once a second to update the time. When Tomo is hidden or covered, it wakes only when the phase ends.
+
+On an Apple silicon Mac, Tomo uses about 0% CPU when idle, about 0.2% while a timer runs, and about 11 MB of memory.
+
 ## Test
 
 ```bash
@@ -50,13 +67,12 @@ Tomo has no Dock icon. If you hide it and forget the shortcut, open the app agai
 | --- | --- |
 | `Sources/TomoCore/TimerEngine.swift` | Pomodoro state machine. Time left comes from a fixed end date, so it stays correct after sleep. |
 | `Sources/Tomo/FloatingPanel.swift` | The always-on-top, transparent panel. |
-| `Sources/Tomo/Sprites.swift` | Tomo's pixel art as text grids, one character per pixel. Edit these to change the art. |
-| `Sources/Tomo/PixelSprite.swift` | Draws the grids as sharp square pixels and plays the animations. |
-| `Sources/Tomo/PetView.swift` | The pet, time badge, progress bar, click, drag, and right-click menu. |
-| `Sources/Tomo/SettingsView.swift` | Durations, alerts, size, launch at login, and shortcuts. |
+| `Sources/Tomo/Sprites.swift` | Tomo's pixel art as text grids, one character per pixel. Edit these to change the art. Each frame is rendered once to a tiny cached image. |
+| `Sources/Tomo/PetView.swift` | The pet, time badge, progress bar, click, drag, and right-click menu, drawn with Core Animation layers. |
+| `Sources/Tomo/SettingsWindow.swift` | The Settings window (AppKit): durations, alerts, size, launch at login, and shortcuts. |
 | `Sources/Tomo/AlertService.swift` | Sound and notification at the end of a phase. |
 | `Sources/Tomo/HotKeys.swift` | Global shortcuts you can change in Settings (Carbon hot keys, no Accessibility permission needed). |
-| `Sources/Tomo/Export.swift` | `--export-sprites`, `--export-window`, `--export-icon` image export. |
+| `Sources/Tomo/Export.swift` | `--export-sprites`, `--export-window`, `--export-icon`, and `--export-settings` image export. |
 
 To preview art changes without launching the app:
 
@@ -67,4 +83,4 @@ To preview art changes without launching the app:
 ## Notes
 
 - The build uses `swiftc` directly because Swift Package Manager is broken in the current Command Line Tools install. `Package.swift` is still here, so you can open the project in Xcode later.
-- The Command Line Tools cannot expand SwiftUI's `@State` macro, so view state lives in `ObservableObject` models instead.
+- The release build uses `-O -wmo`, dead-code stripping, and `strip -x` to keep the app small.

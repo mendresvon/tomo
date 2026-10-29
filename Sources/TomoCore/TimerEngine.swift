@@ -1,4 +1,3 @@
-import Combine
 import Foundation
 
 public enum Phase: String, CaseIterable, Sendable {
@@ -54,12 +53,15 @@ public struct TimerConfig: Equatable, Sendable {
 ///
 /// Time left is always computed from a fixed end date, not by counting ticks.
 /// This keeps it correct after the Mac sleeps or the app is busy.
-public final class TimerEngine: ObservableObject {
-    @Published public private(set) var phase: Phase = .focus
-    @Published public private(set) var state: RunState = .idle
-    @Published public private(set) var remaining: TimeInterval
+public final class TimerEngine {
+    public private(set) var phase: Phase = .focus { didSet { changed() } }
+    public private(set) var state: RunState = .idle { didSet { changed() } }
+    public private(set) var remaining: TimeInterval { didSet { if remaining != oldValue { changed() } } }
     /// Finished (not skipped) focus rounds since the last reset.
-    @Published public private(set) var completedFocusRounds = 0
+    public private(set) var completedFocusRounds = 0 { didSet { changed() } }
+
+    /// Called after any value above changes. Several changes in a row call it several times.
+    public var onChange: (() -> Void)?
 
     public var config: TimerConfig {
         didSet {
@@ -72,6 +74,9 @@ public final class TimerEngine: ObservableObject {
 
     private let now: () -> Date
     private var endDate: Date?
+
+    /// When the running phase ends, or nil when the timer is not running.
+    public var endsAt: Date? { endDate }
 
     public init(config: TimerConfig = TimerConfig(), now: @escaping () -> Date = Date.init) {
         self.config = config
@@ -125,7 +130,8 @@ public final class TimerEngine: ObservableObject {
         remaining = config.duration(for: .focus)
     }
 
-    /// Update the time left. Call this often (for example 4 times a second).
+    /// Update the time left. Call this when the shown time can change (once a second
+    /// while it is visible) and at the end date, so the phase ends on time.
     public func tick() {
         guard state == .running, let endDate else { return }
         remaining = max(0, endDate.timeIntervalSince(now()))
@@ -151,5 +157,9 @@ public final class TimerEngine: ObservableObject {
         if keepRunning { start() }
 
         if finished { onPhaseEnded?(ended, next) }
+    }
+
+    private func changed() {
+        onChange?()
     }
 }

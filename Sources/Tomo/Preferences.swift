@@ -1,10 +1,9 @@
 import Foundation
 import TomoCore
 
-enum PetSize: String, CaseIterable, Identifiable {
+enum PetSize: String, CaseIterable {
     case small, medium, large
 
-    var id: String { rawValue }
     var title: String { rawValue.capitalized }
 
     /// Screen points per sprite pixel.
@@ -18,20 +17,20 @@ enum PetSize: String, CaseIterable, Identifiable {
 }
 
 /// User settings, saved in UserDefaults.
-final class Preferences: ObservableObject {
+final class Preferences {
     private let defaults = UserDefaults.standard
 
     /// Called after any setting changes.
     var onChange: (() -> Void)?
 
-    @Published var focusMinutes: Int { didSet { save(focusMinutes, "focusMinutes") } }
-    @Published var shortBreakMinutes: Int { didSet { save(shortBreakMinutes, "shortBreakMinutes") } }
-    @Published var longBreakMinutes: Int { didSet { save(longBreakMinutes, "longBreakMinutes") } }
-    @Published var roundsBeforeLongBreak: Int { didSet { save(roundsBeforeLongBreak, "roundsBeforeLongBreak") } }
-    @Published var autoStartNext: Bool { didSet { save(autoStartNext, "autoStartNext") } }
-    @Published var soundOn: Bool { didSet { save(soundOn, "soundOn") } }
-    @Published var notificationsOn: Bool { didSet { save(notificationsOn, "notificationsOn") } }
-    @Published var petSize: PetSize { didSet { save(petSize.rawValue, "petSize") } }
+    var focusMinutes: Int { didSet { save(focusMinutes, "focusMinutes") } }
+    var shortBreakMinutes: Int { didSet { save(shortBreakMinutes, "shortBreakMinutes") } }
+    var longBreakMinutes: Int { didSet { save(longBreakMinutes, "longBreakMinutes") } }
+    var roundsBeforeLongBreak: Int { didSet { save(roundsBeforeLongBreak, "roundsBeforeLongBreak") } }
+    var autoStartNext: Bool { didSet { save(autoStartNext, "autoStartNext") } }
+    var soundOn: Bool { didSet { save(soundOn, "soundOn") } }
+    var notificationsOn: Bool { didSet { save(notificationsOn, "notificationsOn") } }
+    var petSize: PetSize { didSet { save(petSize.rawValue, "petSize") } }
 
     init() {
         defaults.register(defaults: [

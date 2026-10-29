@@ -1,18 +1,27 @@
 import AppKit
-import Combine
-import SwiftUI
 import TomoCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let preferences = Preferences()
-    private lazy var engine = TimerEngine(config: preferences.timerConfig)
     private let shortcuts = ShortcutStore()
-    private lazy var model = PetModel(engine: engine, preferences: preferences, shortcuts: shortcuts)
+    private lazy var engine = TimerEngine(config: preferences.timerConfig)
     private let alerts = AlertService()
 
     private var panel: FloatingPanel!
-    private var settingsWindow: NSWindow?
-    private var ticker: Timer?
+    private var petView: PetView!
+    private var settings: SettingsWindowController?
+
+    // Timers run only while the timer runs. When Tomo is visible, one fires each time
+    // the shown second changes. When Tomo is hidden or covered, one fires at the end only.
+    private var clock: Timer?
+    private var clockKey: ClockKey?
+    private var celebrateTimer: Timer?
+    private var renderPending = false
+
+    private struct ClockKey: Equatable {
+        var endsAt: Date?
+        var visible: Bool
+    }
 
     // Drag state, in screen coordinates.
     private var dragStartMouse: NSPoint?
@@ -25,46 +34,113 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences.onChange = { [weak self] in
             guard let self else { return }
             engine.config = preferences.timerConfig
-            // Let SwiftUI lay out the new pet size, then fit the panel to it.
-            DispatchQueue.main.async { self.fitPanelToContent() }
+            petView.applySize()
+            fitPanelToContent()
+            setNeedsRender()
         }
 
+        engine.onChange = { [weak self] in self?.setNeedsRender() }
         engine.onPhaseEnded = { [weak self] ended, next in
             guard let self else { return }
-            model.celebrate()
+            celebrate()
             alerts.phaseEnded(ended, next: next, preferences: preferences)
         }
 
-        model.openSettings = { [weak self] in self?.showSettings() }
-        model.hidePet = { [weak self] in self?.panel.orderOut(nil) }
-        model.dragChanged = { [weak self] in self?.dragChanged() ?? false }
-        model.dragEnded = { [weak self] in self?.dragEnded() ?? false }
+        petView = PetView(engine: engine, preferences: preferences, shortcuts: shortcuts)
+        petView.onTap = { [weak self] in
+            self?.petView.celebrating = false
+            self?.engine.toggle()
+        }
+        petView.openSettings = { [weak self] in self?.showSettings() }
+        petView.hidePet = { [weak self] in self?.setPanelVisible(false) }
+        petView.dragChanged = { [weak self] in self?.dragChanged() ?? false }
+        petView.dragEnded = { [weak self] in self?.dragEnded() ?? false }
 
-        panel = FloatingPanel(rootView: PetView(model: model))
+        panel = FloatingPanel(view: petView)
         placePanel()
         panel.orderFrontRegardless()
 
-        // Time left comes from the end date, so a 4 Hz tick is enough and survives sleep.
-        ticker = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            self?.engine.tick()
+        let center = NotificationCenter.default
+        center.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: panel, queue: .main) { [weak self] _ in
+            self?.setNeedsRender()
         }
-        RunLoop.main.add(ticker!, forMode: .common)
+        // Timers pause while the Mac sleeps, so catch up after it wakes.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            clockKey = nil
+            engine.tick()
+            setNeedsRender()
+        }
 
         HotKeys.shared.setAction(for: .toggle) { [weak self] in self?.engine.toggle() }
         HotKeys.shared.setAction(for: .skip) { [weak self] in self?.engine.skip() }
         HotKeys.shared.setAction(for: .showHide) { [weak self] in self?.togglePanel() }
         shortcuts.onChange = { [weak self] in self?.applyShortcuts() }
         applyShortcuts()
+
+        // `open Tomo.app --args --start` starts a focus round right away.
+        if CommandLine.arguments.contains("--start") { engine.start() }
+        render()
+    }
+
+    /// Opening Tomo again (for example from Finder) brings the pet back.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        setPanelVisible(true)
+        return true
     }
 
     private func applyShortcuts() {
         shortcuts.report(failed: HotKeys.shared.apply(shortcuts))
     }
 
-    /// Opening Tomo again (for example from Finder) brings the pet back.
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        panel.orderFrontRegardless()
-        return true
+    // MARK: - Rendering and timers
+
+    /// The engine reports each value change on its own. This draws once for all of them.
+    private func setNeedsRender() {
+        guard !renderPending else { return }
+        renderPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            renderPending = false
+            render()
+        }
+    }
+
+    private func render() {
+        petView.render()
+        updateClock()
+    }
+
+    private func updateClock() {
+        let visible = panel.isVisible && panel.occlusionState.contains(.visible)
+        let key = ClockKey(endsAt: engine.endsAt, visible: visible)
+        guard key != clockKey else { return }
+        clockKey = key
+        clock?.invalidate()
+        clock = nil
+        guard let end = key.endsAt else { return }
+
+        let timer: Timer
+        if visible {
+            // Fire just after each whole second of time left, when the shown time changes.
+            let left = end.timeIntervalSinceNow
+            let first = Date().addingTimeInterval(left - left.rounded(.down) + 0.02)
+            timer = Timer(fire: first, interval: 1, repeats: true) { [weak self] _ in self?.engine.tick() }
+            timer.tolerance = 0.05
+        } else {
+            timer = Timer(fire: end.addingTimeInterval(0.02), interval: 0, repeats: false) { [weak self] _ in self?.engine.tick() }
+            timer.tolerance = 0.2
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        clock = timer
+    }
+
+    private func celebrate() {
+        petView.celebrating = true
+        celebrateTimer?.invalidate()
+        celebrateTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: false) { [weak self] _ in
+            self?.petView.celebrating = false
+        }
     }
 
     // MARK: - Panel
@@ -79,22 +155,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Resizes the panel to the SwiftUI content and keeps its bottom edge in place.
+    /// Resizes the panel to the pet view and keeps its bottom edge in place.
     private func fitPanelToContent() {
-        guard let content = panel.contentView else { return }
-        let size = content.fittingSize
+        let size = petView.contentSize
         var frame = panel.frame
         frame.origin.x += (frame.width - size.width) / 2
         frame.size = size
         panel.setFrame(frame, display: true)
     }
 
-    private func togglePanel() {
-        if panel.isVisible {
-            panel.orderOut(nil)
-        } else {
+    private func setPanelVisible(_ visible: Bool) {
+        if visible {
             panel.orderFrontRegardless()
+        } else {
+            panel.orderOut(nil)
         }
+        setNeedsRender()
+    }
+
+    private func togglePanel() {
+        setPanelVisible(!panel.isVisible)
     }
 
     /// Moves the panel with the mouse. Returns true once the mouse has moved more than a few points.
@@ -140,20 +220,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Settings
 
     private func showSettings() {
-        if settingsWindow == nil {
-            let settings = SettingsView(preferences: preferences, loginItem: LoginItem(), shortcuts: shortcuts)
-            let window = NSWindow(contentViewController: NSHostingController(rootView: settings))
-            window.title = "Tomo Settings"
-            window.styleMask = [.titled, .closable]
-            window.isReleasedWhenClosed = false
-            window.center()
-            // Stop waiting for new shortcut keys when the window closes.
-            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
-                self?.shortcuts.stopRecording()
+        if settings == nil {
+            let controller = SettingsWindowController(preferences: preferences, shortcuts: shortcuts)
+            // Free the window and its controls once it closes.
+            controller.onClose = { [weak self] in
+                DispatchQueue.main.async { self?.settings = nil }
             }
-            settingsWindow = window
+            settings = controller
         }
         NSApp.activate(ignoringOtherApps: true)
-        settingsWindow?.makeKeyAndOrderFront(nil)
+        settings?.showWindow(nil)
+        settings?.window?.makeKeyAndOrderFront(nil)
     }
 }

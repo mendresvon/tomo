@@ -2,10 +2,8 @@ import AppKit
 import Carbon.HIToolbox
 
 /// The actions you can trigger with a global keyboard shortcut.
-enum Shortcut: String, CaseIterable, Identifiable {
+enum Shortcut: String, CaseIterable {
     case toggle, skip, showHide
-
-    var id: String { rawValue }
 
     var title: String {
         switch self {
@@ -80,14 +78,16 @@ struct KeyCombo: Codable, Equatable {
 }
 
 /// Your chosen shortcuts, saved in UserDefaults, plus the "press new keys" recorder.
-final class ShortcutStore: ObservableObject {
-    @Published private(set) var combos: [Shortcut: KeyCombo] = [:]
+final class ShortcutStore {
+    private(set) var combos: [Shortcut: KeyCombo] = [:] { didSet { onUpdate?() } }
     /// The shortcut that is waiting for new keys, if any.
-    @Published private(set) var recording: Shortcut?
-    @Published private(set) var message: String?
+    private(set) var recording: Shortcut? { didSet { onUpdate?() } }
+    private(set) var message: String? { didSet { onUpdate?() } }
 
     /// Called whenever the hot keys must be registered again.
     var onChange: (() -> Void)?
+    /// Called whenever something shown in Settings changes.
+    var onUpdate: (() -> Void)?
 
     private let defaults = UserDefaults.standard
     private var monitor: Any?
