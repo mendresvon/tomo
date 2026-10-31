@@ -18,6 +18,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var celebrateTimer: Timer?
     private var renderPending = false
 
+    // Tomo holds still when no one can see it, so the display can stay idle.
+    // `open Tomo.app --args -stillAfterSeconds 10` shortens the wait for testing.
+    private lazy var stillAfter: TimeInterval = {
+        let seconds = UserDefaults.standard.double(forKey: "stillAfterSeconds")
+        return seconds > 0 ? seconds : 180
+    }()
+    private var motionTimer: Timer?
+    private var inputMonitor: Any?
+    private var lastNudge = Date()
+    private var displaysAsleep = false
+    private var screenLocked = false
+
     private struct ClockKey: Equatable {
         var endsAt: Date?
         var visible: Bool
@@ -43,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         engine.onPhaseEnded = { [weak self] ended, next in
             guard let self else { return }
             celebrate()
+            nudge()
             alerts.phaseEnded(ended, next: next, preferences: preferences)
         }
 
@@ -50,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         petView.onTap = { [weak self] in
             self?.petView.celebrating = false
             self?.engine.toggle()
+            self?.nudge()
         }
         petView.openSettings = { [weak self] in self?.showSettings() }
         petView.hidePet = { [weak self] in self?.setPanelVisible(false) }
@@ -63,24 +77,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let center = NotificationCenter.default
         center.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: panel, queue: .main) { [weak self] _ in
             self?.setNeedsRender()
+            self?.updateMotion()
         }
+        center.addObserver(forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main) { [weak self] _ in
+            self?.updateMotion()
+        }
+        let workspace = NSWorkspace.shared.notificationCenter
         // Timers pause while the Mac sleeps, so catch up after it wakes.
-        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+        workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
             clockKey = nil
             engine.tick()
             setNeedsRender()
         }
+        workspace.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.displaysAsleep = true
+            self?.updateMotion()
+        }
+        workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.displaysAsleep = false
+            self?.updateMotion()
+        }
+        let distributed = DistributedNotificationCenter.default()
+        distributed.addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
+            self?.screenLocked = true
+            self?.updateMotion()
+        }
+        distributed.addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
+            self?.screenLocked = false
+            self?.nudge()
+        }
 
-        HotKeys.shared.setAction(for: .toggle) { [weak self] in self?.engine.toggle() }
-        HotKeys.shared.setAction(for: .skip) { [weak self] in self?.engine.skip() }
-        HotKeys.shared.setAction(for: .showHide) { [weak self] in self?.togglePanel() }
+        HotKeys.shared.setAction(for: .toggle) { [weak self] in self?.engine.toggle(); self?.nudge() }
+        HotKeys.shared.setAction(for: .skip) { [weak self] in self?.engine.skip(); self?.nudge() }
+        HotKeys.shared.setAction(for: .showHide) { [weak self] in self?.togglePanel(); self?.nudge() }
         shortcuts.onChange = { [weak self] in self?.applyShortcuts() }
         applyShortcuts()
 
         // `open Tomo.app --args --start` starts a focus round right away.
         if CommandLine.arguments.contains("--start") { engine.start() }
         render()
+        updateMotion()
     }
 
     /// Opening Tomo again (for example from Finder) brings the pet back.
@@ -143,6 +180,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Motion
+
+    /// Tomo holds still while it is hidden, covered, on a locked or sleeping screen,
+    /// in Low Power Mode, or after a few minutes with no mouse or keyboard input.
+    private func updateMotion() {
+        motionTimer?.invalidate()
+        motionTimer = nil
+        let seen = panel.isVisible && panel.occlusionState.contains(.visible) && !displaysAsleep && !screenLocked
+        let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        let idle = min(Self.secondsSinceInput, -lastNudge.timeIntervalSinceNow)
+        let away = idle >= stillAfter
+        petView.still = !seen || lowPower || away
+        watchForInput(seen && !lowPower && away)
+        guard seen && !lowPower else { return }
+
+        // Check again when the wait runs out. While away, also check now and then,
+        // because the mouse watcher does not see the keyboard.
+        let wait = away ? 20 : stillAfter - idle + 1
+        let timer = Timer(timeInterval: wait, repeats: false) { [weak self] _ in self?.updateMotion() }
+        timer.tolerance = wait / 10
+        RunLoop.main.add(timer, forMode: .common)
+        motionTimer = timer
+    }
+
+    /// Seconds since the last mouse, keyboard, or trackpad event in this login session.
+    private static var secondsSinceInput: TimeInterval {
+        CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+    }
+
+    /// While Tomo rests because no one is using the Mac, the first mouse event wakes it.
+    /// The watcher exists only while Tomo rests, so it costs nothing the rest of the time.
+    private func watchForInput(_ watch: Bool) {
+        if watch, inputMonitor == nil {
+            inputMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown, .rightMouseDown, .scrollWheel]) { [weak self] _ in
+                self?.updateMotion()
+            }
+        } else if !watch, let monitor = inputMonitor {
+            NSEvent.removeMonitor(monitor)
+            inputMonitor = nil
+        }
+    }
+
+    /// A click, a shortcut, or the end of a phase counts as activity.
+    private func nudge() {
+        lastNudge = Date()
+        updateMotion()
+    }
+
     // MARK: - Panel
 
     private func placePanel() {
@@ -171,6 +256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.orderOut(nil)
         }
         setNeedsRender()
+        updateMotion()
     }
 
     private func togglePanel() {
