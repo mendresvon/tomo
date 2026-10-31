@@ -21,15 +21,6 @@ final class PetView: NSView {
         didSet { if celebrating != oldValue { render() } }
     }
 
-    /// When true, Tomo holds still on the first frame of its mood, so the screen does not change.
-    var still = false {
-        didSet {
-            guard still != oldValue else { return }
-            shownMood = nil
-            render()
-        }
-    }
-
     /// The size the panel must have to show everything.
     private(set) var contentSize = NSSize.zero
 
@@ -229,7 +220,7 @@ final class PetView: NSView {
         CATransaction.setDisableActions(true)
         petLayer.removeAnimation(forKey: "frames")
         petLayer.contents = images.first
-        if images.count > 1 && !still {
+        if images.count > 1 {
             let frames = CAKeyframeAnimation(keyPath: "contents")
             frames.values = images
             frames.calculationMode = .discrete

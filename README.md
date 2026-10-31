@@ -52,7 +52,6 @@ Tomo is made to stay open all day at almost no cost:
 - The pet animation is a looping Core Animation keyframe animation. The system compositor plays it, so Tomo's own code does no work per frame.
 - With no timer running, Tomo has no timers at all and uses no CPU.
 - While a timer runs, Tomo wakes once a second to update the time. When Tomo is hidden or covered, it wakes only when the phase ends.
-- Tomo holds still when no one can see it: when it is hidden or covered, when the screen is locked or asleep, in Low Power Mode, and after 3 minutes with no mouse or keyboard input. A still screen lets the display hardware idle. Tomo moves again on the next mouse movement or click.
 
 On an Apple silicon Mac, Tomo uses about 0% CPU when idle, about 0.2% while a timer runs, and about 11 MB of memory.
 
