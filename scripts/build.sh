@@ -1,13 +1,14 @@
 #!/bin/zsh
 # Builds Tomo.app with swiftc. Works with only the Command Line Tools (no Xcode needed).
 #
-#   ./scripts/build.sh            Build build/Tomo.app
+#   ./scripts/build.sh            Build build.noindex/Tomo.app
 #   ./scripts/build.sh --install  Also copy it to ~/Applications
 set -euo pipefail
 
 ROOT="${0:A:h:h}"
 OBJ="$ROOT/.build/app"
-APP="$ROOT/build/Tomo.app"
+# The .noindex suffix hides this copy from Spotlight, so it only finds the installed one.
+APP="$ROOT/build.noindex/Tomo.app"
 TARGET="$(uname -m)-apple-macos14.0"
 
 mkdir -p "$OBJ"

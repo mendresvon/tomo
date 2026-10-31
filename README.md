@@ -16,7 +16,7 @@ You need macOS 14 or later and the Xcode Command Line Tools (`xcode-select --ins
 ```
 
 ```bash
-open build/Tomo.app
+open build.noindex/Tomo.app
 ```
 
 To copy the app to `~/Applications` so you can open it from Spotlight:
@@ -77,7 +77,7 @@ On an Apple silicon Mac, Tomo uses about 0% CPU when idle, about 0.2% while a ti
 To preview art changes without launching the app:
 
 ```bash
-./scripts/build.sh && build/Tomo.app/Contents/MacOS/Tomo --export-sprites .build/preview
+./scripts/build.sh && build.noindex/Tomo.app/Contents/MacOS/Tomo --export-sprites .build/preview
 ```
 
 ## Notes
